@@ -1,0 +1,70 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Susun struktur proyek
+        run: |
+          M=$(find . -name AndroidManifest.xml -not -path './app/*' -not -path './.git/*' | head -1)
+          [ -n "$M" ] || { echo "AndroidManifest.xml tidak ditemukan"; exit 1; }
+          D=$(dirname "$M")
+          if [ "$D" != "." ]; then
+            cp -a "$D"/. .
+          fi
+
+          B=app/src/main
+          J=$B/java/com/stereodsp
+          mkdir -p $J/dsp $J/audio $J/data $J/ui $B/res/values $B/res/drawable $B/res/mipmap-anydpi-v26
+          mv -f Biquad.kt Reverb.kt ChannelProcessor.kt ChannelSettings.kt FilterChain.kt Spectrum.kt $J/dsp/
+          mv -f AudioEngine.kt PlaybackService.kt SystemEffect.kt SystemEffectService.kt CaptureEngine.kt CaptureService.kt $J/audio/
+          mv -f SettingsStore.kt $J/data/
+          mv -f StereoDspApp.kt $J/ui/
+          mv -f MainActivity.kt DspViewModel.kt $J/
+          mv -f AndroidManifest.xml $B/
+          mv -f strings.xml themes.xml colors.xml $B/res/values/
+          mv -f ic_launcher_foreground.xml ic_stat_nj.xml $B/res/drawable/
+          mv -f ic_launcher.xml $B/res/mipmap-anydpi-v26/
+          mv -f app-build.gradle.kts app/build.gradle.kts
+          mv -f root-build.gradle.kts build.gradle.kts
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --no-daemon
+
+      - name: Ganti nama APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk NJ-Audio.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NJ-Audio-debug-apk
+          path: NJ-Audio.apk
+
+      - name: Terbitkan APK ke Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" NJ-Audio.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "NJ Audio build ${{ github.run_number }}" \
+            --notes "APK debug dibuat otomatis dari commit ${{ github.sha }}." \
+            --latest
